@@ -87,14 +87,28 @@ def descargar_archivos_persona(links, root):
                 nombre_expediente = driver.find_element(By.XPATH,
                                                         '/html/body/div/div[2]/div[4]/div[1]/div[3]/div/div/div[2]/div[1]')
 
-                # Existe carpeta?
-                path = directorio_del_proyecto + "/expedientes/" + nombre_expediente.text
+                if os.name == 'nt':
+                    # Existe carpeta?
+                    path = directorio_del_proyecto + "\\expedientes\\" + nombre_expediente.text
 
-                if os.path.isdir(path):
-                    break
+                    if os.path.isdir(path):
+                        break
 
-                # Cambio direccion de descarga del chromedrive con el nombre de expediente
-                download_dir_temp = download_dir + "/" + nombre_expediente.text
+                    # Cambio direccion de descarga del chromedrive con el nombre de expediente
+                    download_dir_temp = download_dir + "\\" + nombre_expediente.text
+                else:
+                    # Existe carpeta?
+                    path = directorio_del_proyecto + "/expedientes/" + nombre_expediente.text
+
+                    if os.path.isdir(path):
+                        break
+
+                    # Cambio direccion de descarga del chromedrive con el nombre de expediente
+                    download_dir_temp = download_dir + "/" + nombre_expediente.text
+
+
+
+
                 driver.command_executor._commands["send_command"] = (
                     "POST", '/session/$sessionId/chromium/send_command')
                 params = {'cmd': 'Page.setDownloadBehavior',
