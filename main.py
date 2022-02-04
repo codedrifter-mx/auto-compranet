@@ -1,5 +1,9 @@
+import io
 import threading
 import time
+from tkinter import messagebox
+from tkinter.ttk import Progressbar
+
 import wget
 import zipfile
 import requests
@@ -16,60 +20,56 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 
-# link_global = 'https://compranet.hacienda.gob.mx/esop/guest/go/opportunity/detail?opportunityId='
-#
-# from tkinter import *
-# fields = ('Código del expediente', 'Lista de codigos', 'Loan Principle', 'Monthly Payment', 'Remaining Loan')
-#
-# def makeform(root, fields):
-#    entries = {}
-#    for field in fields:
-#       row = Frame(root)
-#       lab = Label(row, width=22, text=field+": ", anchor='w')
-#       ent = Entry(row)
-#       ent.insert(0,"0")
-#       row.pack(side = TOP, fill = X, padx = 5 , pady = 5)
-#       lab.pack(side = LEFT)
-#       ent.pack(side = RIGHT, expand = YES, fill = X)
-#       entries[field] = ent
-#    return entries
+link_global = 'https://compranet.hacienda.gob.mx/esop/guest/go/opportunity/detail?opportunityId='
 
+from tkinter import *
+
+def makeform(root):
+    row = Frame(root)
+
+    root.title("AutoCompraNet")
+    root.geometry('1000x350+500+200')
+
+
+    label_titulo = Label(row, width=30, text="Lista de links de expedientes: ")
+    label_titulo.grid(row = 1,column = 0, padx=5, pady=5)
+
+    multitext = Text(row, height=15)
+    multitext.grid(row = 1,column = 1, padx=0, pady=5)
+
+    scrollbar = Scrollbar(root)
+    scrollbar.pack(side=RIGHT, fill=Y)
+    scrollbar.config(command=multitext.yview)
+    multitext.config(yscrollcommand=scrollbar.set)
+
+    row.pack(side=TOP, fill=X, padx=5, pady=5)
+
+    b1 = Button(root, text='Descargar Expedientes',
+                command=(lambda e=None: automatizar_descargas(multitext.get('1.0', END).splitlines(), root)))
+    b1.pack(side=BOTTOM, padx=5, pady=5)
 
 
 path_del_proyecto = os.path.realpath(__file__)
 directorio_del_proyecto = os.path.dirname(path_del_proyecto)
 
-def automatizar_descargas():
+def automatizar_descargas(columna_links = None, root = None):
 
-    # Rescatamos la columna y lista de links del excel
-    book = open_workbook("seed.xlsx")
-    sheet = book.sheet_by_index(0)  # If your data is on sheet 1
-    columna_links = []
-    for row in range(3, sheet.nrows):  # start from 1, to leave out row 0
-        columna_links.append(" ".join(str(sheet.row_values(row)[45]).strip().split()))  # extract from zero col
-
-    lista_personas_no_encontradas = manager.list()  # <-- can be shared between processes.
-    lista_personas_encontradas = manager.list()  # <-- can be shared between processes.
-
-    links = chunkIt(columna_links, 1)
-    processes = []
+    if len(columna_links)==0 or columna_links is None:
+        # Rescatamos la columna y lista de links del excel
+        book = open_workbook("seed.xlsx")
+        sheet = book.sheet_by_index(0)  # If your data is on sheet 1
+        columna_links = []
+        for row in range(3, sheet.nrows):  # start from 1, to leave out row 0
+            columna_links.append(" ".join(str(sheet.row_values(row)[45]).strip().split()))  # extract from zero col
+    else:
+        columna_links = columna_links[:-1]
 
     # Descargamos el ultimo binario de ChromeDriver
     get_driver()
 
-    # Recorremos links
-    for link in links:
-        p = Process(target=descargar_archivos_persona,
-                    args=(link, lista_personas_no_encontradas, lista_personas_encontradas))  # Passing the list
-        p.start()
-        processes.append(p)
-    for p in processes:
-        p.join()
+    descargar_archivos_persona(columna_links, root)
 
-    print("+++++++++++++++++ Descargas terminadas!!!!!")
-
-
-def descargar_archivos_persona(links, lista_personas_no_encontradas, lista_personas_encontradas):
+def descargar_archivos_persona(links, root):
     driver = get_navigator()
 
     if os.name == 'nt':
@@ -77,8 +77,6 @@ def descargar_archivos_persona(links, lista_personas_no_encontradas, lista_perso
     else:
         download_dir = directorio_del_proyecto + "/expedientes"
 
-    print(links)
-    # try:
     for link in links:
         while True:
             try:
@@ -137,6 +135,8 @@ def descargar_archivos_persona(links, lista_personas_no_encontradas, lista_perso
                         break
             except Exception as e:
 
+                time.sleep(5)
+
                 driver.quit()
                 driver = get_navigator()
 
@@ -144,12 +144,11 @@ def descargar_archivos_persona(links, lista_personas_no_encontradas, lista_perso
                 continue
             break
 
+    time.sleep(5)
 
+    driver.quit()
+    messagebox.showinfo("Proceso Terminado", "Expedientes descargados")
 
-    print("Expedientes descargados")
-    # except:
-    #     print("ups")
-    #     time.sleep(30)
 
 
 def chunkIt(seq, num):
@@ -164,7 +163,16 @@ def chunkIt(seq, num):
     return out
 
 
-threadLocal = threading.local()
+def every_downloads_chrome(driver):
+    if not driver.current_url.startswith("chrome://downloads"):
+        driver.get("chrome://downloads/")
+    return driver.execute_script("""
+        var items = document.querySelector('downloads-manager')
+            .shadowRoot.getElementById('downloadsList').items;
+        if (items.every(e => e.state === "COMPLETE"))
+            return items.map(e => e.fileUrl || e.file_url);
+        """)
+
 
 def get_driver():
     url = 'https://chromedriver.storage.googleapis.com/LATEST_RELEASE'
@@ -203,25 +211,23 @@ def get_navigator():
         chromedriver = directorio_del_proyecto + "/chromedriver"
         download_dir = directorio_del_proyecto + "/expedientes"
 
-    driver = getattr(threadLocal, 'driver', None)
-    if driver is None:
-        chrome_options = Options()
-        chrome_options.add_experimental_option('prefs', {
-            "download.default_directory": download_dir,
-            "download.prompt_for_download": False,
-            "download.directory_upgrade": True,
-            "safebrowsing_for_trusted_sources_enabled": False,
-            "safebrowsing.enabled": False,
-            'profile.default_content_setting_values.automatic_downloads': 1
-        })
-        chrome_options.add_argument('--no-sandbox')
-        # chrome_options.add_argument("--headless")
+    chrome_options = Options()
+    chrome_options.add_experimental_option('prefs', {
+        "download.default_directory": download_dir,
+        "download.prompt_for_download": False,
+        "download.directory_upgrade": True,
+        "safebrowsing_for_trusted_sources_enabled": False,
+        "safebrowsing.enabled": False,
+        'profile.default_content_setting_values.automatic_downloads': 1
+    })
+    chrome_options.add_argument('--no-sandbox')
+    # chrome_options.add_argument("--headless")
 
-        if os.name != 'nt':
-            os.chmod(chromedriver, 0o755)
+    if os.name != 'nt':
+        os.chmod(chromedriver, 0o755)
 
-        ser = Service(chromedriver)
-        driver = webdriver.Chrome(service=ser, options=chrome_options)
+    ser = Service(chromedriver)
+    driver = webdriver.Chrome(service=ser, options=chrome_options)
     return driver
 
 
@@ -230,19 +236,6 @@ def fetch(e):
 
 
 if __name__ == '__main__':
-    freeze_support()
-    manager = Manager()
-    automatizar_descargas()
-
-    # root = Tk()
-    # ents = makeform(root, fields)
-    # root.bind('<Return>', (lambda event, e = ents: fetch(e)))
-    # b1 = Button(root, text = 'Final Balance',
-    #   command=(lambda e = ents: final_balance(e)))
-    # b1.pack(side = LEFT, padx = 5, pady = 5)
-    # b2 = Button(root, text='Monthly Payment',
-    # command=(lambda e = ents: monthly_payment(e)))
-    # b2.pack(side = LEFT, padx = 5, pady = 5)
-    # b3 = Button(root, text = 'Quit', command = root.quit)
-    # b3.pack(side = LEFT, padx = 5, pady = 5)
-    # root.mainloop()
+    root = Tk()
+    makeform(root)
+    root.mainloop()
