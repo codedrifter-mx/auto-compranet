@@ -1,0 +1,6 @@
+.DS_Store
+/output
+/expedientes
+*.xlsx
+*.xlsx.bak
+chromedriver.exe

@@ -1,81 +1,69 @@
-import io
-import threading
 import time
-from tkinter import messagebox
-from tkinter.ttk import Progressbar
-
 import wget
 import zipfile
 import requests
 import os
+import pandas as pd
 
-from multiprocessing import Manager
-from multiprocessing.context import Process
-from multiprocessing.spawn import freeze_support
+from tkinter import messagebox
+from tkinter import *
 from selenium import webdriver
 from selenium.webdriver.support import expected_conditions
 from selenium.webdriver.chrome.options import Options
-from xlrd import open_workbook
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 
-link_global = 'https://compranet.hacienda.gob.mx/esop/guest/go/opportunity/detail?opportunityId='
+ACCESS_LINK = 'https://compranet.hacienda.gob.mx/esop/guest/go/opportunity/detail?opportunityId='
+APP_PATH = os.path.dirname(os.path.realpath(__file__))
 
-from tkinter import *
-
-def makeform(root):
+def make_main_view(root):
     row = Frame(root)
 
     root.title("AutoCompraNet")
     root.geometry('1000x350+500+200')
 
+    lb_title = Label(row, width=30, text="Lista de links de expedientes: ")
+    lb_title.grid(row=1, column=0, padx=5, pady=5)
 
-    label_titulo = Label(row, width=30, text="Lista de links de expedientes: ")
-    label_titulo.grid(row = 1,column = 0, padx=5, pady=5)
-
-    multitext = Text(row, height=15)
-    multitext.grid(row = 1,column = 1, padx=0, pady=5)
+    mt_ids = Text(row, height=15)
+    mt_ids.grid(row=1, column=1, padx=0, pady=5)
 
     scrollbar = Scrollbar(root)
     scrollbar.pack(side=RIGHT, fill=Y)
-    scrollbar.config(command=multitext.yview)
-    multitext.config(yscrollcommand=scrollbar.set)
+    scrollbar.config(command=mt_ids.yview)
+    mt_ids.config(yscrollcommand=scrollbar.set)
 
     row.pack(side=TOP, fill=X, padx=5, pady=5)
 
-    b1 = Button(root, text='Descargar Expedientes',
-                command=(lambda e=None: automatizar_descargas(multitext.get('1.0', END).splitlines(), root)))
-    b1.pack(side=BOTTOM, padx=5, pady=5)
+    btn_start_workflow = Button(root, text='Descargar Expedientes',
+                command=(lambda e=None: main_workflow(mt_ids.get('1.0', END).splitlines())))
+    btn_start_workflow.pack(side=BOTTOM, padx=5, pady=5)
 
-
-path_del_proyecto = os.path.realpath(__file__)
-directorio_del_proyecto = os.path.dirname(path_del_proyecto)
-
-def automatizar_descargas(columna_links = None, root = None):
-
-    if len(columna_links)==0 or columna_links is None:
-        # Rescatamos la columna y lista de links del excel
-        book = open_workbook("seed.xlsx")
-        sheet = book.sheet_by_index(0)  # If your data is on sheet 1
-        columna_links = []
-        for row in range(3, sheet.nrows):  # start from 1, to leave out row 0
-            columna_links.append(" ".join(str(sheet.row_values(row)[45]).strip().split()))  # extract from zero col
+def main_workflow(ids_list):
+    if len(ids_list) == 0:
+        names_df = pd.read_excel("seed.xlsx", names=['fullname'])
+        ids_list = list(names_df.iloc[:, 45:46].str.upper().str.strip().replace('/', ' '))
     else:
-        columna_links = columna_links[:-1]
+        ids_list = ids_list[:-1]
 
-    # Descargamos el ultimo binario de ChromeDriver
-    get_driver()
+    get_latest_driver()
+    download_workflow(ids_list)
 
-    descargar_archivos_persona(columna_links, root)
 
-def descargar_archivos_persona(links, root):
-    driver = get_navigator()
+def download_workflow(links):
+    driver = use_driver()
+    os_string = ""
+    os_separator = ""
 
     if os.name == 'nt':
-        download_dir = directorio_del_proyecto + "\\expedientes"
+        download_dir = APP_PATH + "\\expedientes"
+        os_string = "\\expedientes\\"
+        os_separator = "\\"
     else:
-        download_dir = directorio_del_proyecto + "/expedientes"
+        download_dir = APP_PATH + "/expedientes"
+        os_string = "/expedientes/"
+        os_separator = "/"
 
     for link in links:
         while True:
@@ -84,30 +72,17 @@ def descargar_archivos_persona(links, root):
                 driver.get(link)
 
                 # Agarramos el
-                nombre_expediente = driver.find_element(By.XPATH,
+                name_folder = driver.find_element(By.XPATH,
                                                         '/html/body/div/div[2]/div[4]/div[1]/div[3]/div/div/div[2]/div[1]')
 
-                if os.name == 'nt':
-                    # Existe carpeta?
-                    path = directorio_del_proyecto + "\\expedientes\\" + nombre_expediente.text
+                # Existe carpeta?
+                path = APP_PATH + os_string + name_folder.text
 
-                    if os.path.isdir(path):
-                        break
+                if os.path.isdir(path):
+                    break
 
-                    # Cambio direccion de descarga del chromedrive con el nombre de expediente
-                    download_dir_temp = download_dir + "\\" + nombre_expediente.text
-                else:
-                    # Existe carpeta?
-                    path = directorio_del_proyecto + "/expedientes/" + nombre_expediente.text
-
-                    if os.path.isdir(path):
-                        break
-
-                    # Cambio direccion de descarga del chromedrive con el nombre de expediente
-                    download_dir_temp = download_dir + "/" + nombre_expediente.text
-
-
-
+                # Cambio direccion de descarga del chromedrive con el nombre de expediente
+                download_dir_temp = download_dir + os_separator + name_folder.text
 
                 driver.command_executor._commands["send_command"] = (
                     "POST", '/session/$sessionId/chromium/send_command')
@@ -117,25 +92,20 @@ def descargar_archivos_persona(links, root):
 
                 # Mientras haya un boton de siguiente en la ultima tabla...
                 while True:
-
-                    lista_archivos = []
+                    files_list = []
                     try:
                         # Espero a que aparezca la lista de archivos
                         WebDriverWait(driver, 5).until(expected_conditions.visibility_of_element_located(
                             (By.XPATH, "/html/body/div[1]/div[2]/div[4]/div[1]/div[7]/form/div/table[3]/tbody")))
-
                         # Consigo la lista de archivos
-                        lista_archivos = driver.find_elements(By.XPATH,
+                        files_list = driver.find_elements(By.XPATH,
                                                               '/html/body/div[1]/div[2]/div[4]/div[1]/div[7]/form/div/table[3]/tbody/tr')
                     except:
-                        # Consigo la lista de archivos
-                        lista_archivos = driver.find_elements(By.XPATH,
+                        files_list = driver.find_elements(By.XPATH,
                                                               '/html/body/div[1]/div[2]/div[4]/div[1]/div[7]/form/div/table[2]/tbody/tr')
 
-
-
                     # Recorro la lista de archivos
-                    for archivo in lista_archivos[1:]:
+                    for archivo in files_list[1:]:
                         # Encuentro el link y descargo
                         link_archivo = archivo.find_element(By.TAG_NAME, 'a')
                         link_archivo.click()
@@ -143,16 +113,16 @@ def descargar_archivos_persona(links, root):
                     # Verifico el boton de siguiente en la tabla
                     try:
                         boton_siguiente = driver.find_element(By.XPATH,
-                                             '/html/body/div/div[2]/div[4]/div[1]/div[7]/form/div/div[4]/div/div[2]/span/span[2]/a')
+                                                              '/html/body/div/div[2]/div[4]/div[1]/div[7]/form/div/div[4]/div/div[2]/span/span[2]/a')
                         boton_siguiente.click()
                     except:
                         break
             except Exception as e:
 
-                time.sleep(5)
+                time.sleep(4)
 
                 driver.quit()
-                driver = get_navigator()
+                driver = use_driver()
 
                 print(e)
                 continue
@@ -164,49 +134,29 @@ def descargar_archivos_persona(links, root):
     messagebox.showinfo("Proceso Terminado", "Expedientes descargados")
 
 
-
-def chunkIt(seq, num):
-    avg = len(seq) / float(num)
+def chunkList(list, num):
+    avg = len(list) / float(num)
     out = []
     last = 0.0
 
-    while last < len(seq):
-        out.append(seq[int(last):int(last + avg)])
+    while last < len(list):
+        out.append(list[int(last):int(last + avg)])
         last += avg
 
     return out
 
 
-def every_downloads_chrome(driver):
-    if not driver.current_url.startswith("chrome://downloads"):
-        driver.get("chrome://downloads/")
-    return driver.execute_script("""
-        var items = document.querySelector('downloads-manager')
-            .shadowRoot.getElementById('downloadsList').items;
-        if (items.every(e => e.state === "COMPLETE"))
-            return items.map(e => e.fileUrl || e.file_url);
-        """)
-
-
-def get_driver():
+def get_latest_driver():
     url = 'https://chromedriver.storage.googleapis.com/LATEST_RELEASE'
     response = requests.get(url)
     version_number = response.text
 
-
-
     if os.name == 'nt':
         # build the donwload url
         download_url = "https://chromedriver.storage.googleapis.com/" + version_number + "/chromedriver_win32.zip"
-
-        chromedriver = directorio_del_proyecto + "\\chromedriver.exe"
-        download_dir = directorio_del_proyecto + "\\expedientes"
     else:
         # build the donwload url
         download_url = "https://chromedriver.storage.googleapis.com/" + version_number + "/chromedriver_linux64.zip"
-
-        chromedriver = directorio_del_proyecto + "/chromedriver"
-        download_dir = directorio_del_proyecto + "/expedientes"
 
     # download the zip file using the url built above
     latest_driver_zip = wget.download(download_url, 'chromedriver.zip')
@@ -217,13 +167,13 @@ def get_driver():
     # delete the zip file downloaded above
     os.remove(latest_driver_zip)
 
-def get_navigator():
+def use_driver():
     if os.name == 'nt':
-        chromedriver = directorio_del_proyecto + "\\chromedriver.exe"
-        download_dir = directorio_del_proyecto + "\\expedientes"
+        chromedriver = APP_PATH + "\\chromedriver.exe"
+        download_dir = APP_PATH + "\\expedientes"
     else:
-        chromedriver = directorio_del_proyecto + "/chromedriver"
-        download_dir = directorio_del_proyecto + "/expedientes"
+        chromedriver = APP_PATH + "/chromedriver"
+        download_dir = APP_PATH + "/expedientes"
 
     chrome_options = Options()
     chrome_options.add_experimental_option('prefs', {
@@ -245,11 +195,7 @@ def get_navigator():
     return driver
 
 
-def fetch(e):
-    pass
-
-
 if __name__ == '__main__':
     root = Tk()
-    makeform(root)
+    make_main_view(root)
     root.mainloop()
