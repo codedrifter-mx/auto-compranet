@@ -4,6 +4,7 @@ import zipfile
 import requests
 import os
 import pandas as pd
+import openpyxl
 
 from tkinter import messagebox
 from tkinter import *
@@ -16,6 +17,7 @@ from selenium.webdriver.common.by import By
 
 ACCESS_LINK = 'https://compranet.hacienda.gob.mx/esop/guest/go/opportunity/detail?opportunityId='
 APP_PATH = os.path.dirname(os.path.realpath(__file__))
+
 
 def make_main_view(root):
     row = Frame(root)
@@ -37,13 +39,15 @@ def make_main_view(root):
     row.pack(side=TOP, fill=X, padx=5, pady=5)
 
     btn_start_workflow = Button(root, text='Descargar Expedientes',
-                command=(lambda e=None: main_workflow(mt_ids.get('1.0', END).splitlines())))
+                                command=(lambda e=None: main_workflow(mt_ids.get('1.0', END).splitlines())))
     btn_start_workflow.pack(side=BOTTOM, padx=5, pady=5)
 
+
 def main_workflow(ids_list):
-    if len(ids_list) == 0:
-        names_df = pd.read_excel("seed.xlsx", names=['fullname'])
-        ids_list = list(names_df.iloc[:, 45:46].str.upper().str.strip().replace('/', ' '))
+    if len(ids_list) == 1:
+        # get seed.xlsx with pandas and get the 45th column, skip first two rows and clean each strings
+        df = pd.read_excel(APP_PATH + "/seed.xlsx", skiprows=2)
+        ids_list = df.iloc[:, 45].str.strip().tolist()
     else:
         ids_list = ids_list[:-1]
 
@@ -73,7 +77,7 @@ def download_workflow(links):
 
                 # Agarramos el
                 name_folder = driver.find_element(By.XPATH,
-                                                        '/html/body/div/div[2]/div[4]/div[1]/div[3]/div/div/div[2]/div[1]')
+                                                  '/html/body/div/div[2]/div[4]/div[1]/div[3]/div/div/div[2]/div[1]')
 
                 # Existe carpeta?
                 path = APP_PATH + os_string + name_folder.text
@@ -99,10 +103,10 @@ def download_workflow(links):
                             (By.XPATH, "/html/body/div[1]/div[2]/div[4]/div[1]/div[7]/form/div/table[3]/tbody")))
                         # Consigo la lista de archivos
                         files_list = driver.find_elements(By.XPATH,
-                                                              '/html/body/div[1]/div[2]/div[4]/div[1]/div[7]/form/div/table[3]/tbody/tr')
+                                                          '/html/body/div[1]/div[2]/div[4]/div[1]/div[7]/form/div/table[3]/tbody/tr')
                     except:
                         files_list = driver.find_elements(By.XPATH,
-                                                              '/html/body/div[1]/div[2]/div[4]/div[1]/div[7]/form/div/table[2]/tbody/tr')
+                                                          '/html/body/div[1]/div[2]/div[4]/div[1]/div[7]/form/div/table[2]/tbody/tr')
 
                     # Recorro la lista de archivos
                     for archivo in files_list[1:]:
@@ -149,14 +153,12 @@ def chunkList(list, num):
 def get_latest_driver():
     url = 'https://chromedriver.storage.googleapis.com/LATEST_RELEASE'
     response = requests.get(url)
-    version_number = response.text
+    latest_version = response.text
 
     if os.name == 'nt':
-        # build the donwload url
-        download_url = "https://chromedriver.storage.googleapis.com/" + version_number + "/chromedriver_win32.zip"
+        download_url = "https://chromedriver.storage.googleapis.com/%s/chromedriver_win32.zip" % latest_version
     else:
-        # build the donwload url
-        download_url = "https://chromedriver.storage.googleapis.com/" + version_number + "/chromedriver_linux64.zip"
+        download_url = "https://chromedriver.storage.googleapis.com/%s/chromedriver_linux64.zip" % latest_version
 
     # download the zip file using the url built above
     latest_driver_zip = wget.download(download_url, 'chromedriver.zip')
@@ -166,6 +168,7 @@ def get_latest_driver():
         zip_ref.extractall()  # you can specify the destination folder path here
     # delete the zip file downloaded above
     os.remove(latest_driver_zip)
+
 
 def use_driver():
     if os.name == 'nt':
